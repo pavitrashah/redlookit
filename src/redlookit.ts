@@ -37,7 +37,7 @@ menuButton!.addEventListener('click', () => {
 })
 
 const facesSideLoader = new HumanFacesSideLoader(0);
-for (let i = 0; i < 200; i++) {
+for (let i = 0; i < 50; i++) { // reduced from 200 for performance
     facesSideLoader.sideLoad().catch();
 }
 
@@ -107,14 +107,7 @@ async function showSubreddit(subreddit: string) {
     try {
         const posts: Listing<Post> = await fetchData<Listing<Post>>(`${redditBaseURL}/r/${subreddit}.json?limit=75`);
         const responseData = posts.data.children;
-
-        try {
-            const subredditData = await fetchData<ApiObj>(`${redditBaseURL}/r/${subreddit}/about.json`);
-            const subredditInformation = subredditData.data as SubredditDetails;
-            displayPosts(responseData, subreddit, subredditInformation);
-        } catch (e) {
-            displayPosts(responseData, subreddit);
-        }
+        displayPosts(responseData, subreddit);
     } catch (e) {
         console.error(e);
     }
@@ -491,59 +484,38 @@ function displayCommentsRecursive(parentElement: HTMLElement, listing: ApiObj[],
             
             // Fetch the parent of the "more" listing
             const parentLink = `${redditBaseURL}${post}${data.data.parent_id.slice(3)}`;
-            /*
-                // We used to fetch the comment directly listed by the "more" listing aka data.data.id
-                // But sometimes 'id' was '_' and no children were listed (despite the fact that there was several on the actual website)
-                // If you go back 1 step in the tree to the parent and circle back to the children this way, however, you 
-                //   get around the bug and the children get properly listed
-                // Couldn't tell you why.
-                // If you wish to see the behavior in action, enable this piece of code
-                if (data.data.children.length === 0) {
-                    if (isDebugMode()) console.log("Empty 'more' object?", redditObj);
-                    moreElement.style.backgroundColor = "#ff0000";
-                }
-            */
             
-            moreElement.addEventListener("click", () => {
+            moreElement.addEventListener("click", async () => {
                 moreElement.classList.add("waiting");
-                fetch(`${parentLink}.json`)
-                    .catch((e) => {
+                try {
+                    const data = await fetchData<ApiObj[]>(`${parentLink}.json`);
+                    if (isDebugMode()) console.log("Got data!", parentLink, data);
+                    moreElement.remove();
+
+                    // Our type definitions aren't robust enough to go through the tree properly
+                    // We just cop out. Cast as `any` and try/catch.
+                    let replies: Listing<SnooComment>;
+                    try {
+                        replies = (data as any)[1].data.children[0].data.replies.data
+                    } catch (e) {
                         moreElement.classList.remove("waiting");
-                        console.error(e);
-                    })
-                    .then((response) => {
-                        if (response instanceof Response) {
-                            return response.json()
-                        }
-                    })
-                    .catch((e) => {
-                        console.error(e);
-                    })
-                    .then((data: ApiObj[]) => {
-                        if (isDebugMode()) console.log("Got data!", parentLink, data);
-                        moreElement.remove();
+                        return Promise.reject(e);
+                    }
 
-                        // Our type definitions aren't robust enough to go through the tree properly
-                        // We just cop out. Cast as `any` and try/catch.
-                        let replies: Listing<SnooComment>;
-                        try {
-                            replies = (data as any)[1].data.children[0].data.replies.data
-                        } catch (e) {
-                            return Promise.reject(e);
-                        }
+                    replies.children = replies.children.filter((v) => {
+                        return !commentsEncounteredSoFar.has(v.data.id)
+                    })
 
-                        replies.children = replies.children.filter((v) => {
-                            return !commentsEncounteredSoFar.has(v.data.id)
-                        })
-
-                        displayCommentsRecursive(parentElement, replies.children, {
-                            indent: indent + 10,
-                            ppBuffer: ppBuffer,
-                            post: post,
-                            commentsEncounteredSoFar
-                        });
-                        return Promise.resolve();
+                    displayCommentsRecursive(parentElement, replies.children, {
+                        indent: indent + 10,
+                        ppBuffer: ppBuffer,
+                        post: post,
+                        commentsEncounteredSoFar
                     });
+                } catch (e) {
+                    moreElement.classList.remove("waiting");
+                    console.error(e);
+                }
             });
             parentElement.appendChild(moreElement);
         }
@@ -717,35 +689,92 @@ sortTopAll.addEventListener('click', async function() {
     return fetchAndDisplaySub({tab:'top', sortType: 'all', subreddit: sortButton.id})
 })
 
-async function fetchData<T>(url: string): Promise<T> {
-    // Try to use local proxy server first, then fall back to CORS proxy
-    let targetUrl = url;
-    
-    // Check if we're running locally (development mode)
-    if (isDebugMode()) {
-        // Use local proxy server
-        const localProxyUrl = url.replace('https://www.reddit.com', 'http://localhost:3000/api/reddit');
+// List of CORS proxy services as fallbacks (ordered by reliability)
+const CORS_PROXIES = [
+    'https://api.allorigins.win/raw?url=', // Reliable, permissive CORS
+    'https://corsproxy.io/?'              // Reliable fallback
+];
+
+let LAST_GOOD_PROXY: string | null = null;
+let LOCAL_PROXY_WORKS: boolean | null = null;
+
+// Function to try a single proxy with retries
+async function tryProxy(proxy: string, url: string, retries: number = 0): Promise<Response | null> { // 0 retries for speed
+    for (let attempt = 0; attempt <= retries; attempt++) {
         try {
-            const response = await fetch(localProxyUrl);
+            let proxiedUrl: string;
+
+            // Different proxies have different URL formats
+            if (proxy.includes('allorigins.win')) {
+                proxiedUrl = proxy + encodeURIComponent(url);
+            } else {
+                // Default format (corsproxy.io)
+                proxiedUrl = proxy + encodeURIComponent(url);
+            }
+
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 2500); // 2.5s timeout
+            const response = await fetch(proxiedUrl, { signal: controller.signal });
+            clearTimeout(timeout);
+
             if (response.ok) {
-                const data: T = await response.json();
-                return data;
+                return response;
             }
         } catch (error) {
-            console.warn('Local proxy failed, falling back to CORS proxy:', error);
+            // ignore and retry/advance
         }
     }
-    
-    // Fall back to CORS proxy
-    const corsProxy = 'https://corsproxy.io/?';
-    const proxiedUrl = corsProxy + encodeURIComponent(url);
-    
-    const response = await fetch(proxiedUrl);
-    if (!response.ok) {
-        throw new Error('Network response was not ok' + response.statusText);
+    return null;
+}
+
+async function fetchData<T>(url: string): Promise<T> {
+    // Development: prefer local proxy if it works
+    if (isDebugMode()) {
+        const localProxyUrl = url.replace('https://www.reddit.com', 'http://localhost:3000/api/reddit');
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 2000); // 2s
+            const response = await fetch(localProxyUrl, { signal: controller.signal });
+            clearTimeout(timeout);
+            if (response.ok) {
+                LOCAL_PROXY_WORKS = true;
+                const data: T = await response.json();
+                return data;
+            } else {
+                LOCAL_PROXY_WORKS = false;
+            }
+        } catch (_) {
+            LOCAL_PROXY_WORKS = false;
+        }
     }
-    const data: T = await response.json();
-    return data;
+
+    // Use cached good proxy if available first
+    if (LAST_GOOD_PROXY) {
+        try {
+            const response = await tryProxy(LAST_GOOD_PROXY, url);
+            if (response && response.ok) {
+                const data: T = await response.json();
+                return data;
+            } else {
+                LAST_GOOD_PROXY = null; // reset and reselect
+            }
+        } catch (_) {
+            LAST_GOOD_PROXY = null;
+        }
+    }
+
+    // Try public proxies in order
+    for (let i = 0; i < CORS_PROXIES.length; i++) {
+        const proxy = CORS_PROXIES[i];
+        const response = await tryProxy(proxy, url);
+        if (response && response.ok) {
+            LAST_GOOD_PROXY = proxy; // cache for speed
+            const data: T = await response.json();
+            return data;
+        }
+    }
+
+    throw new Error('All CORS proxies failed to fetch data from Reddit');
 }
 
 // Alternative function using Reddit's official API (requires app registration)
@@ -773,19 +802,17 @@ async function fetchAndDisplaySub({sortType=null, tab="hot", subreddit}: subredd
     sortMenu.style.display = 'none';
     sortTopMenu.style.display = 'none';
     sortButton.classList.remove('opened');
-    const posts = await fetchData<Listing<Post>>(`${redditBaseURL}/r/${subreddit}/${tab}/.json${sortType ? `?t=${sortType}` : ''}`);
-    const responseData = posts.data.children;
 
-    try {
-        // Always fetch subreddit details
-        const subredditData = await fetchData<ApiObj>(`${redditBaseURL}/r/${subreddit}/about.json`);
-        const subredditInformation = subredditData.data as SubredditDetails;
-        displayPosts(responseData, subreddit, subredditInformation);
-    } catch (e) {
-        // If fetching subreddit details fails, still display posts (with fallback info)
-        displayPosts(responseData, subreddit);
-        console.error(e);
-    }
+    const base = `${redditBaseURL}/r/${subreddit}/${tab}/.json`;
+    const params = new URLSearchParams();
+    if (sortType) params.set('t', sortType);
+    params.set('limit', '75');
+    const url = `${base}?${params.toString()}`;
+
+    const posts = await fetchData<Listing<Post>>(url);
+    const responseData = posts.data.children;
+    // Do not block on subreddit details; show posts immediately
+    displayPosts(responseData, subreddit);
 }
 
 function isCrosspost(post: Post) {
