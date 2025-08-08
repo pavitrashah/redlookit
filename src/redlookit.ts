@@ -718,7 +718,44 @@ sortTopAll.addEventListener('click', async function() {
 })
 
 async function fetchData<T>(url: string): Promise<T> {
-    const response = await fetch(url);
+    // Try to use local proxy server first, then fall back to CORS proxy
+    let targetUrl = url;
+    
+    // Check if we're running locally (development mode)
+    if (isDebugMode()) {
+        // Use local proxy server
+        const localProxyUrl = url.replace('https://www.reddit.com', 'http://localhost:3000/api/reddit');
+        try {
+            const response = await fetch(localProxyUrl);
+            if (response.ok) {
+                const data: T = await response.json();
+                return data;
+            }
+        } catch (error) {
+            console.warn('Local proxy failed, falling back to CORS proxy:', error);
+        }
+    }
+    
+    // Fall back to CORS proxy
+    const corsProxy = 'https://corsproxy.io/?';
+    const proxiedUrl = corsProxy + encodeURIComponent(url);
+    
+    const response = await fetch(proxiedUrl);
+    if (!response.ok) {
+        throw new Error('Network response was not ok' + response.statusText);
+    }
+    const data: T = await response.json();
+    return data;
+}
+
+// Alternative function using Reddit's official API (requires app registration)
+async function fetchDataWithAuth<T>(url: string): Promise<T> {
+    const headers = {
+        'User-Agent': 'Redlookit/1.0 (by /u/one-loop)',
+        'Accept': 'application/json'
+    };
+    
+    const response = await fetch(url, { headers });
     if (!response.ok) {
         throw new Error('Network response was not ok' + response.statusText);
     }

@@ -9,7 +9,8 @@
     "dev": "webpack --mode=development",
     "prod": "webpack --mode=production --define-process-env-node-env=production",
     "watch": "webpack --watch",
-    "deploy": "gh-pages -d public"
+    "deploy": "gh-pages -d public",
+    "server": "node server.js"
   },
   "repository": {
     "type": "git",
@@ -36,6 +37,9 @@
   "keywords": [],
   "dependencies": {
     "file-loader": "^6.2.0",
-    "html-webpack-plugin": "^5.5.0"
+    "html-webpack-plugin": "^5.5.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "node-fetch": "^2.6.7"
   }
 }
