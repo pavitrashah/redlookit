@@ -105,11 +105,134 @@ async function showSubreddit(subreddit: string) {
     strictQuerySelector('.post-header-button.sort').id = subreddit;
 
     try {
+        // Fetch posts
         const posts: Listing<Post> = await fetchData<Listing<Post>>(`${redditBaseURL}/r/${subreddit}.json?limit=75`);
+        console.log(`[DEBUG] Fetched posts for r/${subreddit}:`, posts);
         const responseData = posts.data.children;
-        displayPosts(responseData, subreddit);
+        console.log(`[DEBUG] responseData for r/${subreddit}:`, responseData);
+
+        // Fetch subreddit details
+        let subredditDetails: SubredditDetails = {
+            ...{
+                title: subreddit,
+                icon_img: '',
+                community_icon: '',
+                subscribers: null,
+                public_description: '',
+                active_user_count: 0,
+                display_name_prefixed: `r/${subreddit}`,
+                over18: false
+            },
+            ...{
+                accounts_active_is_fuzzed: false,
+                accounts_active: 0,
+                advertiser_category: "",
+                all_original_content: false,
+                allow_discovery: false,
+                allow_galleries: false,
+                allow_images: false,
+                allow_polls: false,
+                allow_predictions_tournament: false,
+                allow_predictions: false,
+                allow_videogifs: false,
+                allow_videos: false,
+                banner_background_color: "",
+                banner_background_image: "",
+                can_assign_link_flair: false,
+                can_assign_user_flair: false,
+                collapse_deleted_comments: false,
+                comment_score_hide_mins: 0,
+                community_reviewed: false,
+                created_utc: 0,
+                created: 0,
+                description_html: "",
+                disable_contributor_requests: false,
+                emojis_custom_size: undefined,
+                emojis_enabled: false,
+                has_menu_widget: false,
+                header_img: "",
+                header_title: "",
+                hide_ads: false,
+                id: "",
+                is_crosspostable_subreddit: false,
+                is_enrolled_in_new_modmail: undefined,
+                lang: "",
+                link_flair_position: "",
+                mobile_banner_image: "",
+                notification_level: "",
+                original_content_tag_enabled: false,
+                prediction_leaderboard_entry_type: "",
+                primary_color: "",
+                public_description_html: "",
+                public_traffic: false,
+                quarantine: false,
+                show_media_preview: false,
+                spoilers_enabled: false,
+                submission_type: "",
+                submit_link_label: "",
+                submit_text_html: "",
+                submit_text: "",
+                subreddit_type: "",
+                suggested_comment_sort: "",
+                user_can_flair_in_sr: false,
+                user_flair_background_color: undefined,
+                user_flair_css_class: undefined,
+                user_flair_enabled_in_sr: false,
+                user_flair_position: "",
+                user_flair_richtext: [],
+                user_flair_template_id: undefined,
+                user_flair_text_color: undefined,
+                user_flair_text: undefined,
+                user_flair_type: "",
+                user_has_favorited: false,
+                user_is_banned: false,
+                user_sr_flair_enabled: false,
+                user_sr_theme_enabled: false,
+                whitelist_status: "",
+                wiki_enabled: false,
+                wls: 0,
+                accept_followers: false,
+                banner_img: "",
+                banner_size: [],
+                description: "",
+                display_name: "",
+                free_form_reports: false,
+                header_size: [],
+                icon_size: undefined,
+                key_color: "",
+                link_flair_enabled: false,
+                name: "",
+                restrict_commenting: false,
+                restrict_posting: false,
+                show_media: false,
+                submit_text_label: "",
+                url: "",
+                user_is_contributor: false,
+                user_is_moderator: false,
+                user_is_muted: false,
+                user_is_subscriber: false
+            }
+        };
+        try {
+            const details = await fetchData<any>(`${redditBaseURL}/r/${subreddit}/about.json`);
+            subredditDetails = {
+                ...subredditDetails,
+                title: details.data.title || subreddit,
+                icon_img: details.data.icon_img || '',
+                community_icon: details.data.community_icon || '',
+                subscribers: details.data.subscribers || null,
+                public_description: details.data.public_description || '',
+                active_user_count: details.data.active_user_count || 0,
+                display_name_prefixed: details.data.display_name_prefixed || `r/${subreddit}`,
+                over18: details.data.over18 || false
+            };
+        } catch (err) {
+            console.warn(`[DEBUG] Could not fetch subreddit details for r/${subreddit}:`, err);
+        }
+
+        displayPosts(responseData, subreddit, subredditDetails);
     } catch (e) {
-        console.error(e);
+        console.error(`[DEBUG] Error fetching posts for r/${subreddit}:`, e);
     }
 }
 
@@ -278,6 +401,28 @@ function displayPosts(responses: Post[], subreddit, subredditInformation: Subred
     user_is_muted: false,
     user_is_subscriber: false
 }) {
+    console.log(`[DEBUG] displayPosts called for r/${subreddit} with responses:`, responses);
+    // If the API response is an error object, display the error
+    if (responses && (responses as any).error) {
+        const errorObj = responses as any;
+        console.error(`[DEBUG] API error for r/${subreddit}:`, errorObj);
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'no-posts-message';
+        errorMsg.textContent = `Error loading r/${subreddit}: ${errorObj.error} (status ${errorObj.status})\n${errorObj.message}`;
+        postsList.innerHTML = '';
+        postsList.appendChild(errorMsg);
+        return;
+    }
+    if (!responses || responses.length === 0) {
+        console.warn(`[DEBUG] No posts to display for r/${subreddit}.`);
+        // Show a user-friendly message in the UI
+        const noPostsMsg = document.createElement('div');
+        noPostsMsg.className = 'no-posts-message';
+        noPostsMsg.textContent = `No posts available for r/${subreddit}. This subreddit may be empty, restricted, or have no recent activity.`;
+        postsList.innerHTML = '';
+        postsList.appendChild(noPostsMsg);
+        return;
+    }
     if (subreddit !== 'popular' && (localStorage.getItem('showSubDetails') == null || localStorage.getItem('showSubDetails') == 'true')) {
         // let postSectionDiv = document.querySelector('.post-sidebar');
         subredditInfoContainer.style.display = 'flex';
@@ -728,53 +873,24 @@ async function tryProxy(proxy: string, url: string, retries: number = 0): Promis
 }
 
 async function fetchData<T>(url: string): Promise<T> {
-    // Development: prefer local proxy if it works
-    if (isDebugMode()) {
-        const localProxyUrl = url.replace('https://www.reddit.com', 'http://localhost:3000/api/reddit');
-        try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 2000); // 2s
-            const response = await fetch(localProxyUrl, { signal: controller.signal });
-            clearTimeout(timeout);
-            if (response.ok) {
-                LOCAL_PROXY_WORKS = true;
-                const data: T = await response.json();
-                return data;
-            } else {
-                LOCAL_PROXY_WORKS = false;
-            }
-        } catch (_) {
-            LOCAL_PROXY_WORKS = false;
-        }
+    // Use local proxy when running locally, otherwise use deployed proxy
+    // Always use local proxy when running locally, otherwise use deployed proxy
+    let proxyBase: string;
+    const urlObj = new URL(window.location.href);
+    if (urlObj.hostname === "localhost" || urlObj.hostname === "127.0.0.1" || urlObj.protocol === "file:") {
+        proxyBase = "http://localhost:3000/api/reddit";
+    } else {
+        proxyBase = "https://your-app.onrender.com/api/reddit"; // Replace with your actual deployed backend URL
     }
+    const proxiedUrl = url.replace("https://www.reddit.com", proxyBase);
 
-    // Use cached good proxy if available first
-    if (LAST_GOOD_PROXY) {
-        try {
-            const response = await tryProxy(LAST_GOOD_PROXY, url);
-            if (response && response.ok) {
-                const data: T = await response.json();
-                return data;
-            } else {
-                LAST_GOOD_PROXY = null; // reset and reselect
-            }
-        } catch (_) {
-            LAST_GOOD_PROXY = null;
-        }
+    // Only use the proxy, no fallback to public CORS proxies
+    const response = await fetch(proxiedUrl);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch data from proxy: ${response.status} ${response.statusText}`);
     }
-
-    // Try public proxies in order
-    for (let i = 0; i < CORS_PROXIES.length; i++) {
-        const proxy = CORS_PROXIES[i];
-        const response = await tryProxy(proxy, url);
-        if (response && response.ok) {
-            LAST_GOOD_PROXY = proxy; // cache for speed
-            const data: T = await response.json();
-            return data;
-        }
-    }
-
-    throw new Error('All CORS proxies failed to fetch data from Reddit');
+    const data: T = await response.json();
+    return data;
 }
 
 // Alternative function using Reddit's official API (requires app registration)
@@ -811,8 +927,126 @@ async function fetchAndDisplaySub({sortType=null, tab="hot", subreddit}: subredd
 
     const posts = await fetchData<Listing<Post>>(url);
     const responseData = posts.data.children;
-    // Do not block on subreddit details; show posts immediately
-    displayPosts(responseData, subreddit);
+
+    // Fetch subreddit details for correct UI
+    let subredditDetails: SubredditDetails = {
+        ...{
+            title: subreddit,
+            icon_img: '',
+            community_icon: '',
+            subscribers: null,
+            public_description: '',
+            active_user_count: 0,
+            display_name_prefixed: `r/${subreddit}`,
+            over18: false
+        },
+        ...{
+            accounts_active_is_fuzzed: false,
+            accounts_active: 0,
+            advertiser_category: "",
+            all_original_content: false,
+            allow_discovery: false,
+            allow_galleries: false,
+            allow_images: false,
+            allow_polls: false,
+            allow_predictions_tournament: false,
+            allow_predictions: false,
+            allow_videogifs: false,
+            allow_videos: false,
+            banner_background_color: "",
+            banner_background_image: "",
+            can_assign_link_flair: false,
+            can_assign_user_flair: false,
+            collapse_deleted_comments: false,
+            comment_score_hide_mins: 0,
+            community_reviewed: false,
+            created_utc: 0,
+            created: 0,
+            description_html: "",
+            disable_contributor_requests: false,
+            emojis_custom_size: undefined,
+            emojis_enabled: false,
+            has_menu_widget: false,
+            header_img: "",
+            header_title: "",
+            hide_ads: false,
+            id: "",
+            is_crosspostable_subreddit: false,
+            is_enrolled_in_new_modmail: undefined,
+            lang: "",
+            link_flair_position: "",
+            mobile_banner_image: "",
+            notification_level: "",
+            original_content_tag_enabled: false,
+            prediction_leaderboard_entry_type: "",
+            primary_color: "",
+            public_description_html: "",
+            public_traffic: false,
+            quarantine: false,
+            show_media_preview: false,
+            spoilers_enabled: false,
+            submission_type: "",
+            submit_link_label: "",
+            submit_text_html: "",
+            submit_text: "",
+            subreddit_type: "",
+            suggested_comment_sort: "",
+            user_can_flair_in_sr: false,
+            user_flair_background_color: undefined,
+            user_flair_css_class: undefined,
+            user_flair_enabled_in_sr: false,
+            user_flair_position: "",
+            user_flair_richtext: [],
+            user_flair_template_id: undefined,
+            user_flair_text_color: undefined,
+            user_flair_text: undefined,
+            user_flair_type: "",
+            user_has_favorited: false,
+            user_is_banned: false,
+            user_sr_flair_enabled: false,
+            user_sr_theme_enabled: false,
+            whitelist_status: "",
+            wiki_enabled: false,
+            wls: 0,
+            accept_followers: false,
+            banner_img: "",
+            banner_size: [],
+            description: "",
+            display_name: "",
+            free_form_reports: false,
+            header_size: [],
+            icon_size: undefined,
+            key_color: "",
+            link_flair_enabled: false,
+            name: "",
+            restrict_commenting: false,
+            restrict_posting: false,
+            show_media: false,
+            submit_text_label: "",
+            url: "",
+            user_is_contributor: false,
+            user_is_moderator: false,
+            user_is_muted: false,
+            user_is_subscriber: false
+        }
+    };
+    try {
+        const details = await fetchData<any>(`${redditBaseURL}/r/${subreddit}/about.json`);
+        subredditDetails = {
+            ...subredditDetails,
+            title: details.data.title || subreddit,
+            icon_img: details.data.icon_img || '',
+            community_icon: details.data.community_icon || '',
+            subscribers: details.data.subscribers || null,
+            public_description: details.data.public_description || '',
+            active_user_count: details.data.active_user_count || 0,
+            display_name_prefixed: details.data.display_name_prefixed || `r/${subreddit}`,
+            over18: details.data.over18 || false
+        };
+    } catch (err) {
+        console.warn(`[DEBUG] Could not fetch subreddit details for r/${subreddit}:`, err);
+    }
+    displayPosts(responseData, subreddit, subredditDetails);
 }
 
 function isCrosspost(post: Post) {

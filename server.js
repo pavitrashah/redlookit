@@ -24,16 +24,26 @@ app.get('/api/reddit/*', async (req, res) => {
     const targetUrl = buildTargetUrl(req);
     const upstream = await fetch(targetUrl, {
       headers: {
-        'User-Agent': 'Redlookit/1.0 (by /u/one-loop)',
-        'Accept': 'application/json'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Connection': 'keep-alive'
       }
     });
 
-    // Forward status and body directly
+    const ct = upstream.headers.get('content-type') || '';
     const bodyText = await upstream.text();
+
+    if (!upstream.ok || !ct.includes('application/json')) {
+      res.status(upstream.status).json({
+        error: 'Upstream error',
+        status: upstream.status,
+        message: bodyText
+      });
+      return;
+    }
+
     res.status(upstream.status);
-    // Pass-through content-type when possible
-    const ct = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
     res.set('content-type', ct);
     res.send(bodyText);
   } catch (error) {
