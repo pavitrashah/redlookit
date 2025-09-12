@@ -880,7 +880,7 @@ async function fetchData<T>(url: string): Promise<T> {
     if (urlObj.hostname === "localhost" || urlObj.hostname === "127.0.0.1" || urlObj.protocol === "file:") {
         proxyBase = "http://localhost:3000/api/reddit";
     } else {
-        proxyBase = "https://your-app.onrender.com/api/reddit"; // Replace with your actual deployed backend URL
+        proxyBase = "https://redlookit.onrender.com/api/reddit";
     }
     const proxiedUrl = url.replace("https://www.reddit.com", proxyBase);
 
