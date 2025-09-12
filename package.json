@@ -10,7 +10,8 @@
     "prod": "webpack --mode=production --define-process-env-node-env=production",
     "watch": "webpack --watch",
     "deploy": "gh-pages -d public",
-    "server": "node server.js"
+    "server": "node server.js",
+    "start": "node server.js"
   },
   "repository": {
     "type": "git",
